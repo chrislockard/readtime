@@ -1,0 +1,26 @@
+# Built binaries. The bare name matches this module's own output; the
+# suffixed form covers cross-compiled builds (readtime-linux-arm64).
+/readtime
+/readtime-*
+
+# Compiled objects and platform binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.html
+
+# Go workspace files, which are local to one machine
+go.work
+go.work.sum
+
+# Dependency directory, if vendoring is ever turned on
+/vendor/
+
+# macOS
+.DS_Store
