@@ -1,8 +1,10 @@
-// Command readtime analyzes Hugo blog posts (markdown) and reports word
-// count, sentence count, estimated reading time, and readability scores.
+// Command readtime analyzes text files -- Hugo blog posts (markdown) and
+// plain prose alike -- and reports word count, sentence count, estimated
+// reading time, and readability scores.
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -53,6 +55,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	sortKey := fs.String("sort", "name", "sort by name, words, time, or grade")
 	includeDrafts := fs.Bool("drafts", false, "include posts with draft: true in front matter")
 	showVersion := fs.Bool("version", false, "print version and exit")
+	sniffBytes := fs.Int("sniff-bytes", 512, "bytes read from a file's start to decide if it's text")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -60,6 +63,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if *showVersion {
 		fmt.Fprintln(stdout, "readtime "+version)
 		return 0
+	}
+	if *sniffBytes <= 0 {
+		fmt.Fprintf(stderr, "readtime: invalid --sniff-bytes value %d (want a positive number)\n", *sniffBytes)
+		return 1
 	}
 	switch *sortKey {
 	case "name", "words", "time", "grade":
@@ -82,13 +89,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			entries = append(entries, e)
 		}
 	} else {
-		files, err := collectFiles(paths, stderr)
+		files, err := collectFiles(paths, *sniffBytes, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "readtime: %v\n", err)
 			return 1
 		}
 		if len(files) == 0 {
-			fmt.Fprintln(stderr, "readtime: no markdown files found")
+			fmt.Fprintln(stderr, "readtime: no text files found")
 			return 1
 		}
 		for _, f := range files {
@@ -105,7 +112,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if len(entries) == 0 {
-		fmt.Fprintln(stderr, "readtime: no markdown files found")
+		fmt.Fprintln(stderr, "readtime: no text files found")
 		return 1
 	}
 
@@ -144,11 +151,12 @@ type fileRef struct {
 	display string // path shown in output, relative to the arg it came from
 }
 
-// collectFiles walks each argument path, gathering markdown files.
-// Directories are walked recursively for .md/.markdown files, skipping
-// dotted directories and Hugo build/dependency output. A single file
-// argument is included regardless of extension.
-func collectFiles(paths []string, stderr io.Writer) ([]fileRef, error) {
+// collectFiles walks each argument path, gathering text files. Directories
+// are walked recursively, skipping dotted directories and Hugo
+// build/dependency output; a file (whether named directly or found while
+// walking) is included if its content looks like text, regardless of
+// extension.
+func collectFiles(paths []string, sniffBytes int, stderr io.Writer) ([]fileRef, error) {
 	var files []fileRef
 	for _, p := range paths {
 		info, err := os.Stat(p)
@@ -157,6 +165,15 @@ func collectFiles(paths []string, stderr io.Writer) ([]fileRef, error) {
 			continue
 		}
 		if !info.IsDir() {
+			ok, err := looksLikeText(p, sniffBytes)
+			if err != nil {
+				fmt.Fprintf(stderr, "readtime: %s: %v\n", p, err)
+				continue
+			}
+			if !ok {
+				fmt.Fprintf(stderr, "readtime: %s: not a text file, skipping\n", p)
+				continue
+			}
 			files = append(files, fileRef{path: p, display: filepath.Base(p)})
 			continue
 		}
@@ -173,8 +190,12 @@ func collectFiles(paths []string, stderr io.Writer) ([]fileRef, error) {
 				}
 				return nil
 			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if ext != ".md" && ext != ".markdown" {
+			ok, err := looksLikeText(path, sniffBytes)
+			if err != nil {
+				fmt.Fprintf(stderr, "readtime: %s: %v\n", path, err)
+				return nil
+			}
+			if !ok {
 				return nil
 			}
 			rel, err := filepath.Rel(base, path)
@@ -189,6 +210,30 @@ func collectFiles(paths []string, stderr io.Writer) ([]fileRef, error) {
 		}
 	}
 	return files, nil
+}
+
+// looksLikeText reports whether path's content appears to be text rather
+// than binary. It reads up to sniffBytes from the start of the file and
+// treats the presence of a NUL byte in that sample as proof of binary
+// content: real-world binary formats (images, archives, executables) almost
+// always have one within the first few hundred bytes, while text in any
+// encoding -- UTF-8 or otherwise -- never contains one. This is the same
+// heuristic git and the Unix `file` command use, and it avoids the false
+// positives a printable-character or UTF-8-validity check would produce on
+// legitimately non-UTF-8 text.
+func looksLikeText(path string, sniffBytes int) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, sniffBytes)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return false, err
+	}
+	return !bytes.Contains(buf[:n], []byte{0}), nil
 }
 
 // ---------------------------------------------------------------------------
