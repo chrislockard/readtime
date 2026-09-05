@@ -1,10 +1,10 @@
 # readtime
 
-`readtime` is a command-line tool that analyzes Hugo blog posts (markdown)
-and reports word count, sentence count, estimated reading time, and
-readability scores. It's built entirely on the Go standard library, so it
-has no third-party dependencies and cross-compiles cleanly for any platform
-Go supports.
+`readtime` is a command-line tool that analyzes text files — Hugo blog posts
+(markdown) and plain prose alike — and reports word count, sentence count,
+estimated reading time, and readability scores. It's built entirely on the Go
+standard library, so it has no third-party dependencies and cross-compiles
+cleanly for any platform Go supports.
 
 ## Install / build
 
@@ -32,18 +32,24 @@ GOOS=darwin  GOARCH=arm64 go build -o readtime-mac .
 readtime [flags] <path>...
 ```
 
-Each `path` may be a markdown file or a directory. Directories are walked
-recursively for `.md` and `.markdown` files. Dotted directories (`.git`,
-`.hugo_build.lock`'s parent, etc.) and Hugo's `public/`, `resources/`, and
-`node_modules/` directories are skipped, since they're build output or
-dependencies rather than content.
+Each `path` may be a text file or a directory. Directories are walked
+recursively, and any file whose content looks like text is included,
+regardless of extension — there's no `.md`/`.markdown` whitelist. A file
+"looks like text" if the first `--sniff-bytes` bytes (512 by default)
+contain no NUL byte, the same heuristic `git` and `file(1)` use; a binary
+file named directly on the command line is skipped with a warning rather
+than analyzed. Dotted directories (`.git`, `.hugo_build.lock`'s parent,
+etc.) and Hugo's `public/`, `resources/`, and `node_modules/` directories
+are skipped, since they're build output or dependencies rather than
+content.
 
-If no paths are given, `readtime` reads a single markdown document from
-stdin and reports it as `(stdin)`.
+If no paths are given, `readtime` reads a single document from stdin and
+reports it as `(stdin)`.
 
 ```sh
 readtime content/post                    # analyze a whole section
 readtime content/post/my-post.md         # analyze a single post
+readtime notes.txt                       # analyze any text file
 cat content/post/my-post.md | readtime   # analyze from stdin
 ```
 
@@ -55,11 +61,12 @@ cat content/post/my-post.md | readtime   # analyze from stdin
 | `--wpm`    | `200`   | Reading speed in words per minute, used to estimate reading time. (Hugo itself defaults to 213 wpm.) |
 | `--sort`   | `name`  | Sort order: `name`, `words`, `time`, or `grade`. `name` sorts ascending; the numeric keys sort descending, so the longest/hardest posts show up first. |
 | `--drafts` | off     | Include posts with `draft: true` in front matter. Drafts are excluded by default. |
+| `--sniff-bytes` | `512` | Bytes read from a file's start to decide if it's text. |
 | `--version`| —       | Print the version and exit. |
 
-Exit status is `0` on success, `1` on a usage error or if no markdown files
-were found. A file that fails to read is reported to stderr and skipped;
-it doesn't abort the rest of the run.
+Exit status is `0` on success, `1` on a usage error or if no text files
+were found. A file that fails to read, or that doesn't look like text, is
+reported to stderr and skipped; it doesn't abort the rest of the run.
 
 ## Output
 
@@ -165,4 +172,6 @@ remaining markdown syntax (headings, lists, blockquotes, tables, thematic
 breaks, emphasis markers, and footnotes).
 
 Front matter is also where `title` and `draft` are read from, to label
-output and to decide whether a post should be included by default.
+output and to decide whether a post should be included by default. None of
+this is required — a plain text file with no front matter and no markdown
+syntax passes through unchanged and is analyzed as-is.
